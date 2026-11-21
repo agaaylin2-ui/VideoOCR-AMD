@@ -49,19 +49,21 @@ def instrument(directory: Path, batch: int, threads: int) -> None:
     if threads:
         cv2.setNumThreads(threads)
 
-    def wrap_model(original: Callable[..., Any], label: str, model: Any, *a: Any, **kw: Any) -> None:
-        original(model, *a, **kw)
+    def wrap_model(label: str, model: Any) -> None:
         for key, operation in model.pre_tfs.items():
             model.pre_tfs[key] = partial(timed, 'preprocess', operation)
         model.runner = partial(timed, label + '_runner', model.runner)
         model.post_op = partial(timed, label + '_postprocess', model.post_op)
 
     for cls, label in ((TextDetRunnerPredictor, 'det'), (TextRecRunnerPredictor, 'rec')):
-        original = cls.__init__
+        original = cls.process
 
-        def init(model: Any, *a: Any, _fn: Any = original, _label: str = label, **kw: Any) -> None:
-            wrap_model(_fn, _label, model, *a, **kw)
-        patch.object(cls, '__init__', init).start()
+        def process_batch(model: Any, *a: Any, _fn: Any = original, _label: str = label, **kw: Any) -> Any:
+            if not getattr(model, "_videocr_timed", False):
+                wrap_model(_label, model)
+                model._videocr_timed = True
+            return _fn(model, *a, **kw)
+        patch.object(cls, 'process', process_batch).start()
 
     read = ReadImage.__call__
 

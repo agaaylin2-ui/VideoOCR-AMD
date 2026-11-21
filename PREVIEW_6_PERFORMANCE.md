@@ -38,19 +38,28 @@ Ordered delivery delayed a completed chunk by up to 2.41 seconds. The executor a
 
 Stage 2 already removed 5,117 redundant frames. Its boxes come from stitched detection grids. Stage 3 detects again on individually repacked JPEGs. Equivalent boxes, scores and SRTs from reusing grid detections have not been demonstrated. The baseline spent 1.26 seconds removing the working directory and 0.11 seconds assembling the SRT.
 
-## Full episode and short control
+## Worker cap experiment
 
-Input was AX_spiritual_realm_ep_13_eng.mp4 (22:16), English, default settings, DirectML adapter 0. The baseline source tree matched release tag v1.6.0-amd-preview.5. The candidate caps the OCR pass at two processes; detection can still use three. Single-worker short exports take the same application path.
+A blanket two-worker cap looked promising in the first full run (171.98 s Stage 3 versus 175.65 s; 200.41 s total versus 206.24 s). Repeating in reverse order gave 214.14 s versus 121.05 s (244.30 s total versus 149.34 s). Shorter repeated tests with automatic detection worker selection likewise gave 14.97/12.63 s for two recognition workers and 13.85/10.55 s for three. Two workers had shorter worst-case chunks on the first run but higher per-worker RSS. The shipped candidate retains the original worker count policy, input batches and ordering.
+
+## Recognition postprocessing
+
+The pinned PaddleX CTC decoder copies the complete recognition output, scans its vocabulary axis for the winning character, then scans that axis again for its probability. For normal video subtitles the candidate reads the existing logits, computes the same winning indices and gathers their probabilities directly. The existing PaddleX decoder still removes blanks/repeats, looks up characters and computes confidence. Word-box requests take the original path.
+
+A paired CPU benchmark used float32 tensors, six lines per batch, the verified model's 18,710 classes, and 40 alternating-order comparisons per shape on this machine. Median decoding fell from 2.03 to 0.31 ms at 32 time steps and from 5.56 to 0.81 ms at 80. The two paths returned identical text and scores on the same seeded inputs and on tied inputs. The pinned ORT runner passes contiguous NumPy inputs to session.run and returns CPU outputs. The change removes extra host memory traffic after that boundary; the GPU graph and provider configuration are identical.
+
+## End-to-end comparison
+
+AX_spiritual_realm_ep_13_eng.mp4, 22:16, English, default crop/settings, adapter 0, one export at a time. The baseline source tree matched release tag v1.6.0-amd-preview.5.
 
 | Input and version | Detection / OCR workers | Stage 1 s | Stage 2 s | Stage 3 s | Final s | Total s | OCR images/s |
 |---|---|---:|---:|---:|---:|---:|---:|
-| Full episode, Preview 5 | 3 / 3 | 15.56 | 13.23 | 175.65 | 1.80 | 206.24 | 41.68 |
-| Full episode, candidate | 3 / 2 | 15.41 | 11.36 | 171.98 | 1.66 | 200.41 | 42.57 |
-| 04:02–04:11, Preview 5 (47 images) | 1 / 1 | 0.79 | 1.86 | 2.84 | 0.02 | 5.51 | 16.56 |
-| Same excerpt, candidate | 1 / 1 | 0.75 | 1.59 | 2.22 | 0.02 | 4.57 | 21.20 |
+| Full, Preview 5 first run | 3 / 3 | 15.56 | 13.23 | 175.65 | 1.80 | 206.24 | 41.68 |
+| Full, Preview 5 repeat | 3 / 3 | 15.39 | 11.24 | 121.05 | 1.67 | 149.34 | 60.48 |
+| 04:02–04:11, Preview 5 | 1 / 1 | 0.79 | 1.86 | 2.84 | 0.02 | 5.51 | 16.56 |
+| Full, optimized decoder | 3 / 3 | 15.65 | 12.26 | 156.11 | 1.75 | 185.77 | 46.90 |
+| 04:02–04:11, optimized decoder | 1 / 1 | 0.76 | 1.69 | 2.62 | 0.02 | 5.09 | 17.96 |
 
-The full-episode SRT matched byte for byte (SHA-256 67bc6bfb1105e8cb49b4c176bf393158b6cf5b6a8689ef64be047697d9bcd8c3). The nine-second outputs matched the reference SRTs in English, Simplified Chinese and Traditional Chinese. A historical English full-episode export had different cues in the credits; the quality comparison above uses the paired runs on the same machine and settings. This benchmark produced 7,321 recognition images rather than the originally observed 7,562.
+Full recognition postprocessing fell from 45.52 and 30.67 worker-seconds in the baseline runs to 8.90. The candidate's median and maximum full-episode chunks took 1.30 and 13.33 seconds. Pool shutdown took 0.30 seconds for detection and 0.55 for OCR. Temporary cleanup took 1.22 seconds and SRT assembly 0.11. The full-episode elapsed time falls inside the observed baseline range; a universal end-to-end speedup is unverified. Recognition inference is still the largest cost.
 
-With two workers, full-episode median/max chunk times were 0.99/8.25 seconds and maximum completion-to-delivery delay was 0.88 seconds. The workers handled 115 and 114 chunks. Process shutdown took 0.47 seconds in Stage 3. Mean last-quarter worker RSS increased from 738 MiB per worker with three to 1,238 MiB per worker with two. Memory availability limits are still applied. The recognizer receives contiguous CPU NumPy inputs and returns outputs through ONNX Runtime session.run for CPU decoding. The measurements do not separate host-device copy costs from inference.
-
-The full-episode Stage 3 improvement was 2.1% in one paired run. Setup/cache and run-to-run variation affect the totals, as illustrated by the single-worker control. Verify on additional episodes before generalizing the result.
+The paired full English SRTs matched byte for byte (SHA-256 67bc6bfb1105e8cb49b4c176bf393158b6cf5b6a8689ef64be047697d9bcd8c3). The nine-second English, Simplified Chinese and Traditional Chinese exports matched their saved reference SRTs including timestamps. A historical full English reference differed in several credits cues even from the fresh Preview 5 baseline. The fresh release-baseline and candidate runs on this machine produced 7,321 recognition images, compared with 7,562 originally reported. Other hardware and episodes remain unmeasured.
