@@ -143,7 +143,8 @@ class DirectMLVideoBackend:
         # process owns its sessions and processes its GPU calls sequentially.
         images_per_worker = 128 if detection else 256
         memory_limit = max(1, psutil.virtual_memory().available // (2 * 1024 ** 3))
-        workers = min(3, 1 + len(images) // images_per_worker, memory_limit)
+        worker_limit = 3 if detection else 2
+        workers = min(worker_limit, 1 + len(images) // images_per_worker, memory_limit)
         config = (self.models, self.adapter, traces, detection)
         evidence = self.evidence[stage] = {}
         start = perf_counter()
