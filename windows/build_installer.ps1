@@ -14,7 +14,9 @@ if ($LASTEXITCODE -or !$meta.artifact) { throw 'Invalid desktop release metadata
 & $Compiler /Qp "/DBundle=$Bundle" "/DAppVersion=$($meta.version)" "/DWindowsVersion=$($meta.windows)" "/DArtifactName=$($meta.artifact)" "/O$OutputDirectory" "$PSScriptRoot/amd_setup.iss" | Out-Host
 if ($LASTEXITCODE) { throw "Installer compilation failed ($LASTEXITCODE)" }
 $file = Get-Item -LiteralPath (Join-Path $OutputDirectory ($meta.artifact + '.exe'))
-if ($file.VersionInfo.ProductVersion -ne $meta.version -or $file.VersionInfo.FileVersion -ne $meta.version) {
+$info = $file.VersionInfo
+$numeric = ($info.FileMajorPart, $info.FileMinorPart, $info.FileBuildPart, $info.FilePrivatePart) -join '.'
+if ($info.ProductVersion.TrimEnd() -ne $meta.version -or $info.FileVersion.TrimEnd() -ne $meta.version -or $numeric -ne $meta.windows) {
     throw 'Compiled installer version does not match the bundled application'
 }
 $file
